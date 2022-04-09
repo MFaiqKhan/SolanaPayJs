@@ -2,6 +2,7 @@ import Products from '../components/Products'
 import SiteHeading from '../components/SiteHeading'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
+import CouponBook from '../components/CouponBook'
 
 export default function HomePage() {
   const { publicKey } = useWallet() // this is the public key of the wallet for the connected wallet , if there is one connected!.
@@ -13,6 +14,8 @@ export default function HomePage() {
         <WalletMultiButton className="!bg-gray-900 hover:scale-105" />
         {/*  ability to connect to multiple wallets from the homepage to our homepage */}
       </div>
+
+      {publicKey && <CouponBook/>}
 
       {/* We disable checking out without a connected wallet */}
       {/* Also the submitTarget is /buy/transaction instead of /checkout */}
