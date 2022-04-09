@@ -1,6 +1,20 @@
 // will be using this api/makeTransactions.ts file to generate transaction for a given checkout.
 // and then it will be requested to the user to approve the transaction from the frontend wallet.
 
+// -------------Transaction Request ----- ///////////////
+
+
+//This flexibility to send any transaction isn’t available to us in Solana Pay’s transfer requests, 
+//but it’s the goal of an upcoming Solana Pay specification: transaction requests.
+// Instead of encoding parameters for a single payment, we encode a URL that the wallet should use to request a transaction.
+// It will then display that transaction to the user to approve. This API can return any transaction at all!
+
+//The wallet makes two requests to our URL. In the first it sends a GET request, and we can return some data identifying ourselves
+//. The wallet can display this to the user so they understand who they’re transacting with. 
+//In the second it sends a POST request with the public key of the buyer, and we return our transaction and message.
+//The wallet will display the transaction to the user so they can approve it.
+
+
 import { getMint, getAssociatedTokenAddress, createTransferCheckedInstruction } from "@solana/spl-token" 
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base"
 import { clusterApiUrl, Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js"
@@ -8,11 +22,11 @@ import { NextApiRequest, NextApiResponse } from "next" // nextjs api is used to 
 import { shopAddress, usdcAddress } from "../../lib/addresses" // we are using this file to get the shop address and usdc address.
 import calculatePrice from "../../lib/calculatePrice"
 
-export type MakeTransactionInputData = { // this is the input data that will be sent to the frontend.
+export type MakeTransactionInputData = { // this is the input data variable os custom type that will be sent to the frontend.
   account: string, // the account that the user will be sending the transaction to.
 }
 
-export type MakeTransactionOutputData = { // this is the output data that will be available from the frontend
+export type MakeTransactionOutputData = { // this is the output data variable os custom type that will be available from the frontend
   transaction: string, // the transaction that will be sent to the frontend.
   message: string, // the message that will be sent to the frontend.
 }
@@ -21,10 +35,23 @@ type ErrorOutput = { // this is the error output that will be available from the
   error: string
 }
 
-export default async function handler(
-  req: NextApiRequest, // this is the request to the frontend.
-  res: NextApiResponse<MakeTransactionOutputData | ErrorOutput> // this is the response that will be sent to the frontend, if there is no error then the response will be the transaction and message, if there is any error then the response will be the error.
-) {
+
+type MakeTransactionGetResponse = {  // this is the response that will be sent to the frontend, if the request is a get request.
+  label: string, 
+  icon: string, // the label and icon that will be sent to the frontend.
+}
+
+const get = (res: NextApiResponse<MakeTransactionGetResponse>) => { // this is the get function that will be called from the handler function.
+  res.status(200).json({ // if the response status is 200, then the response will be sent to the frontend.
+    label: "Bakery Co.",
+    icon: "icon",
+  })
+}
+
+const post = async ( req: NextApiRequest, res: NextApiResponse<MakeTransactionOutputData | ErrorOutput>)  => 
+  //req: NextApiRequest : this is the request to the frontend. 
+  // res: NextApiResponse<MakeTransactionOutputData | ErrorOutput> : this is the response that will be sent to the frontend, if there is no error then the response will be the transaction and message, if there is any error then the response will be the error.
+ {
   try {
     // We pass the selected items in the query, calculate the expected cost
     console.log(req.query);
@@ -199,5 +226,19 @@ export default async function handler(
     return
   }
 }
+
+
+const handler = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionGetResponse | MakeTransactionOutputData | ErrorOutput> ) => { // handler function is checking the request method and calls either get or post
+  if (req.method === "GET") { // if the request is a get request, call the get function
+    return get(res) // return the response from the get function to the client side
+  } else if (req.method === "POST") {
+    return await post(req, res)
+  } else {
+    return res.status(405).json({ error: "Method not allowed" })
+  }
+}
+
+export default handler;
+
 
 // https://docs.solana.com/developing/clients/javascript-api
