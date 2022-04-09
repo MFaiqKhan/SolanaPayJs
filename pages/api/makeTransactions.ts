@@ -110,13 +110,29 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
 
     // Get the buyer and seller coupon token accounts
     // Buyer one may not exist, so we create it (which costs SOL) as the shop account if it doesn't 
-    const buyerCouponAddress = await getOrCreateAssociatedTokenAccount(
+
+    /* const buyerCouponAddress = await getOrCreateAssociatedTokenAccount(
       connection,
       shopKeypair, // shop pays the fee to create it
       couponAddress, // which token the account is for
       buyerPublicKey, // who the token account belongs to (the buyer)
-    ).then(account => account.address)
-    console.log(buyerCouponAddress); // it is account address of the buyer coupon account.
+    ).then(account => account.address) */
+    //console.log(buyerCouponAddress); // it is account address of the buyer coupon account.
+
+
+    // Get the buyer and seller coupon token accounts
+    // Buyer one may not exist, so we create it (which costs SOL) as the shop account if it doesn't 
+    const buyerCouponAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      shopKeypair, // shop pays the fee to create it
+      couponAddress, // which token the account is for
+      buyerPublicKey, // who the token account belongs to (the buyer)
+    )
+    // getOrCreateAssociatedTokenAccount() is returning as an Account Object. 
+    // Previously we only needed the address, but now we also need to check the amount so we keep it in this form
+
+    // If the buyer has at least 5 coupons, they can use them and get a discount
+    const buyerGetsCouponDiscount = buyerCouponAccount.amount >= 5
 
     const shopCouponAddress = await getAssociatedTokenAddress(couponAddress, shopPublicKey)
 
@@ -160,6 +176,10 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
       feePayer: buyerPublicKey,
     })
 
+
+    // If the buyer has the coupon discount, divide the amount in USDC by 2
+    const amountToPay = buyerGetsCouponDiscount ? amount.dividedBy(2) : amount // if the buyer has the coupon discount, then the amount to pay is half of the amount.
+
     // Create the instruction to send SOL from the buyer to the shop
     // A Solana transaction can contain a sequence of instructions, - they either all succeed or the transaction fails with no changes
     // here we are sending instruction, that send sol from one account to another
@@ -170,8 +190,7 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
     //   fromPubkey: buyerPublicKey,
     //   lamports: amount.multipliedBy(LAMPORTS_PER_SOL).toNumber(),
     //   toPubkey: shopPublicKey,
-    // })
-
+    // })    
 
 
     //////------USDC PAYMENT CHANGES ////////
@@ -190,9 +209,12 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
       usdcAddress, // mint (token address)
       shopUsdcAddress, // destination
       buyerPublicKey, // owner of source address
-      amount.toNumber() * (10 ** (await usdcMint).decimals), // amount to transfer (in units of the USDC token)
+      amountToPay.toNumber() * (10 ** (await usdcMint).decimals), // amount to transfer (in units of the USDC token)
       usdcMint.decimals, // decimals of the USDC token
     )
+    // The amount we charge the user in the transferInstruction is now based on buyerGetsCouponDiscount -
+    // if they have the coupon discount then we charge them half as much
+
 
     //////------USDC PAYMENT CHANGES ////////
 
@@ -223,7 +245,52 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
       isWritable: false,
     })
 
-    // Create the instruction to send the coupon from the shop to the buyer
+    // If we’re applying the coupon discount then the direction of the coupon exchange swaps - 
+    //the buyer must send us 5 coupons in exchange for the discount. 
+    //If they don’t yet have enough coupons for the discount then the shop continues to send them a 
+    //single coupon with each transaction.
+
+    const couponInstruction = buyerGetsCouponDiscount ?
+      // The coupon instruction is to send 5 coupons from the buyer to the shop
+      createTransferCheckedInstruction(
+        buyerCouponAccount.address, // source account (coupons)
+        couponAddress, // token address (coupons)
+        shopCouponAddress, // destination account (coupons)
+        buyerPublicKey, // owner of source account
+        5, // amount to transfer
+        0, // decimals of the token - we know this is 0
+      ) :
+      // The coupon instruction is to send 1 coupon from the shop to the buyer
+      createTransferCheckedInstruction(
+        shopCouponAddress, // source account (coupon)
+        couponAddress, // token address (coupon)
+        buyerCouponAccount.address, // destination account (coupon)
+        shopPublicKey, // owner of source account
+        1, // amount to transfer
+        0, // decimals of the token - we know this is 0
+      )
+
+    // Add the shop as a signer to the coupon instruction
+    // If the shop is sending a coupon, it already will be a signer
+    // But if the buyer is sending the coupons, the shop won't be a signer automatically
+    // It's useful security to have the shop sign the transaction
+    couponInstruction.keys.push({
+      pubkey: shopPublicKey,
+      isSigner: true,
+      isWritable: false,
+    })
+
+    //Earlier we discussed how having the shop sign transactions gives us a nice way to verify each transaction -
+    //-is as we expected because it stops anybody from changing it.
+    // If a transaction has our signature then we know we created it with our API.
+    // But our shop was only a required signer because of the coupon instruction where it sent a coupon to the buyer. 
+    //It’s no longer a required signer in the case where the buyer is sending the coupons and receiving the discount 
+    //because the shop isn’t sending anything to the buyer in that transaction. 
+    //In this code, we add our shop as a signer on the coupon instruction.
+    // So whichever instruction we end up using, the transaction can only be made with the shop’s signature.
+
+
+    /* // Create the instruction to send the coupon from the shop to the buyer
     const couponInstruction = createTransferCheckedInstruction( // this is the instruction to send the coupon from the shop to the buyer
       shopCouponAddress, // source account (coupon)
       couponAddress, // token address (coupon)
@@ -231,7 +298,7 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
       shopPublicKey, // owner of source account
       1, // amount to transfer
       0, // decimals of the token - we know this is 0
-    )
+    ) */
 
     // This is very similar to the instruction we use to send USDC from the buyer to the shop, 
     // but it sends exactly 1 coupon from the shop to the buyer. We add both instructions to the transaction.
@@ -247,7 +314,7 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
     //it must sign this transaction for it to be allowed to take place. 
     //As the comment says, this is only a partial sign because the user will still need to sign it afterward!
 
-    
+
     //So now our API is producing a transaction where the buyer sends us USDC and we send a coupon back. 
     // It’s signed by our shop, which actually gives us some nice extra protection. 
     // Nobody can modify this transaction without invalidating the shop’s signature, 
@@ -277,10 +344,11 @@ const post = async (req: NextApiRequest, res: NextApiResponse<MakeTransactionOut
 
     // Insert into database: reference, amount etc. we can do if we want to.	
 
+    const message = buyerGetsCouponDiscount ? "50% Discount! 🍪" : "Thanks for your order! 🍪"
     // Return the serialized transaction
     res.status(200).json({
       transaction: base64,
-      message: "Thanks for your order! 🍪",
+      message,
     })
   } catch (err) {
     console.error(err);
