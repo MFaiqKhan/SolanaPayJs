@@ -48,8 +48,9 @@ export default function Checkout() {
 
   // Generate the unique reference which will be used for this transaction
   const reference = useMemo(() => Keypair.generate().publicKey, []); // useMemo is a React hook that only re-renders when the value it returns changes. It’s a performance optimization.
-  // we will be creating a new keypair every time we render the page, so we can use the public key to generate a unique reference.
+  // we will be creating a new keypair once every initial render, so we can use the public key to generate a unique reference.
   // on every transaction, checkout page, we will be generating a new reference.
+  console.log(reference); // LOG THE REFERENCE TO THE CONSOLE
 
   // Add it to the params we'll pass to the API
   searchParams.append('reference', reference.toString());
@@ -136,7 +137,7 @@ export default function Checkout() {
     const interval = setInterval( async () => { // setting an interval
       try { 
         // Check if there is any transaction for the reference
-        const signatureInfo = await findTransactionSignature(connection, reference)  // finding the transaction using the reference and connection
+        const signatureInfo = await findTransactionSignature(connection, reference, {} , 'confirmed')  // finding the transaction using the reference and connection, have added the confirmed option to finality. we can aslo finalized status but it takes time for transaction to finalized
         console.log(signatureInfo); 
         console.log('They Paid!!'); // if they paid, they paid, It will keep polling in the background to see if the user has paid and will show them they paid . means console log will show them they paid every 0.5 sec 
         router.push('/ConfirmedPage'); // users will be redirected to the confirmed page after their transaction successfully made
@@ -148,10 +149,15 @@ export default function Checkout() {
         console.error('Unknown error', e); 
       }
     }, 500); // every 0.5s
-    return () => { // when the component is unmounted
+    return () => { // It's useEffect cleanup function   // when the component is unmounted
       clearInterval(interval); // clear the interval
     } 
   }, []) // only re-run the effect if the connection changes
+
+  //https://blog.logrocket.com/understanding-react-useeffect-cleanup-function/#:~:text=What%20is%20the%20useEffect%20cleanup,itself%20using%20the%20cleanup%20function.
+  //the useEffect cleanup is a function in the useEffect Hook that allows us to tidy up our code before ....
+  //...our component unmounts. When our code runs and reruns for every render, 
+  //useEffect also cleans up after itself using the cleanup function.
 
 
   if (!publicKey) {
@@ -173,7 +179,7 @@ export default function Checkout() {
       <WalletMultiButton />
 
       {message ?
-        <p>{message} Please approve the transaction using your wallet</p> :
+        <p className="flex items-center justify-between">{message} <span className="mr-4"> Please approve the transaction using your wallet</span> <Loading /> and wait</p> :
         <p className="flex items-center justify-between"><span className="mr-4 font-semibold">Creating transaction...</span> <Loading /></p>
       }
     </div>
